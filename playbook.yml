@@ -1,28 +1,17 @@
 ---
 - name: Full Stack Monitoring Setup (Install Agent + Register to Server)
   hosts: all
-  become: yes          # Bắt buộc có quyền root để cài phần mềm
-  gather_facts: yes    # Để lấy thông tin IP, OS
+  become: yes          # Bắt buộc có quyền root để cài agent
+  gather_facts: yes    # Lấy thông tin máy đích
 
   vars:
     # --- CẤU HÌNH CHUNG ---
-    zabbix_server_ip: "192.168.1.12"  # IP máy chạy Docker Zabbix
-    
-    # --- CẤU HÌNH API (Để đăng ký lên Server) ---
-    ansible_connection: httpapi
-    ansible_network_os: community.zabbix.zabbix
-    ansible_host: "{{ zabbix_server_ip }}"
-    ansible_httpapi_port: 80
-    ansible_user: Admin
-    ansible_httpapi_pass: zabbix
-    ansible_httpapi_zabbix_path: "/" 
-    ansible_zabbix_url_path: "/"
+    zabbix_server_ip: "192.168.1.12"  # IP của Docker Zabbix Server
 
   tasks:
-    # ========================================================
-    # PHẦN 1: TỰ ĐỘNG CÀI ĐẶT & CẤU HÌNH AGENT TRÊN MÁY ĐÍCH
-    # (Chạy trực tiếp trên máy Debian 192.168.1.13)
-    # ========================================================
+    # ============================================
+    # PHẦN 1: CÀI ĐẶT AGENT (Chạy trên máy 192.168.1.13)
+    # ============================================
     
     - name: Install Zabbix Agent (Debian/Ubuntu)
       apt:
@@ -51,22 +40,33 @@
         line: "Hostname={{ inventory_hostname }}"
       notify: Restart Zabbix Agent
 
-    - name: Ensure Zabbix Agent is running and enabled
+    - name: Start Zabbix Agent Service
       service:
         name: zabbix-agent
         state: started
         enabled: yes
 
-    # ========================================================
-    # PHẦN 2: TỰ ĐỘNG ĐĂNG KÝ HOST LÊN ZABBIX SERVER
-    # (Chạy tại localhost, bắn API về Server)
-    # ========================================================
-
+    # ============================================
+    # PHẦN 2: ĐĂNG KÝ LÊN SERVER (Chạy tại Localhost)
+    # ============================================
+    
     - name: Register Host to Zabbix Server via API
-      delegate_to: localhost   # Chuyển về máy Jenkins để bắn API
+      delegate_to: localhost   # Chạy task này tại máy Jenkins
+      
+      vars:
+        # --- Cấu hình kết nối API Zabbix ---
+        ansible_connection: httpapi
+        ansible_network_os: community.zabbix.zabbix
+        ansible_host: "{{ zabbix_server_ip }}"
+        ansible_httpapi_port: 80
+        ansible_user: Admin
+        ansible_httpapi_pass: zabbix
+        ansible_httpapi_zabbix_path: "/" 
+        ansible_zabbix_url_path: "/"
+
       community.zabbix.zabbix_host:
         host_name: "{{ inventory_hostname }}"
-        visible_name: "{{ inventory_hostname }} - Auto Full Stack"
+        visible_name: "{{ inventory_hostname }} - Correct IP Fixed"
         host_groups:
           - Linux servers
         link_templates:
@@ -77,13 +77,16 @@
           - type: 1
             main: 1
             useip: 1
-            ip: "{{ ansible_default_ipv4.address }}"
+            # --- ĐIỂM SỬA QUAN TRỌNG NHẤT ---
+            # Dùng inventory_hostname để lấy chính xác IP 192.168.1.13
+            ip: "{{ inventory_hostname }}"
+            # -------------------------------
             dns: ""
             port: "10050"
 
-  # ========================================================
-  # HANDLER: Chỉ chạy restart khi file config bị thay đổi
-  # ========================================================
+  # ============================================
+  # HANDLERS (Chỉ chạy khi file config thay đổi)
+  # ============================================
   handlers:
     - name: Restart Zabbix Agent
       service:
